@@ -21,14 +21,14 @@ public class ClaimMode {
         player.sendMessage(Format.color("&amust line up to create a square or rectangle."));
     }
 
-    public static void addCorner(Player player) {
+    /*public static void addCorner(Player player) {
         Chunk
-    }
+    }*/
 
     public static void disableClaiming(Player player) {
         if(DataHandler.hasData(player, "smpt_claiming_corner1", DataType.LOCATION)) DataHandler.removeData(player, "smpt_claiming_corner1");
     }
 
-    public static void claim(Player player, Loc)
+    //public static void claim(Player player, Loc)
 
 }

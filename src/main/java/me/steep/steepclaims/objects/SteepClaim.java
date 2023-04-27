@@ -2,60 +2,75 @@ package me.steep.steepclaims.objects;
 
 import com.jeff_media.morepersistentdatatypes.DataType;
 import me.steep.datahandler.DataHandler;
-import me.steep.steepclaims.SteepClaims;
 import org.bukkit.Chunk;
-import org.bukkit.World;
+import org.bukkit.configuration.serialization.ConfigurationSerializable;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitRunnable;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
 @SuppressWarnings("all")
-public class SteepClaim { // TODO fix this class for only chunks.
+public class SteepClaim implements ConfigurationSerializable {
+
+    // TODO fix this class for only chunks.
 
     private class ClaimSettings {
 
-        private final Map<UUID, Set<ClaimPermission>> playerPermissions = new HashMap<>();
-        private boolean hidden = false;
-        private boolean pvp = false;
-
-        /**
-         * Attempting to enable pvp in a claim that has hidden set to true will fail and return false.
-         *
-         * @param pvp
-         * @return Whether the action succeeded.
-         */
-        public boolean setPvPEnabled(boolean pvp) {
-            if(this.hidden && pvp) return false;
-            this.pvp = pvp;
-            return true;
+        public enum ClaimFlag {
+            HIDDEN,
+            PVP;
         }
 
-        public boolean getPvPEnabled() {
-            return this.pvp;
+        private Map<UUID, Set<ClaimPermission>> playerPermissions = new HashMap<>();
+        private Map<ClaimFlag, Boolean> flags = new HashMap<>(Map.of(
+                ClaimFlag.HIDDEN, false,
+                ClaimFlag.PVP, false));
+
+        public ClaimSettings(Map<UUID, Set<ClaimPermission>> playerPermissions, Map<ClaimFlag, Boolean> flags) {
+            this.playerPermissions = playerPermissions;
+            this.flags = flags;
         }
 
-        /**
-         * Attempting to enable hidden in a claim that has pvp set to true will fail and return false.
-         *
-         * @param hidden
-         * @return Whether the action succeeded.
-         */
-        public boolean setHidden(boolean hidden) {
-            if(this.pvp && hidden) return false;
-            this.hidden = hidden;
-            return true;
-        }
-
-        public boolean getHidden() {
-            return this.hidden;
+        public ClaimSettings() {
         }
 
         public boolean hasPermission(@NotNull Player player, @NotNull ClaimPermission permission) {
-            if(getPermissions(player) == null) return false;
-            return getPermissions(player).contains(permission);
+            Set<ClaimPermission> permissions = getPermissions(player);
+            if(permissions == null) return false;
+            return permissions.contains(permission);
+        }
+
+        /**
+         *
+         * @param player
+         * @param permission
+         * @return False if the player already had this ClaimPermission.
+         */
+        public boolean addPermission(@NotNull Player player, @NotNull ClaimPermission permission) {
+
+            if(hasPermission(player, permission)) return false;
+
+            if(!this.playerPermissions.containsKey(player.getUniqueId())) {
+                this.playerPermissions.put(player.getUniqueId(), new HashSet<>(Set.of(permission)));
+                return true;
+            }
+
+            getPermissions(player).add(permission);
+            return true;
+
+        }
+
+        public void removePermission(@NotNull Player player, @NotNull ClaimPermission permission) {
+            if(!this.playerPermissions.containsKey(player.getUniqueId()) || !getPermissions(player).contains(permission)) return;
+            getPermissions(player).remove(permission);
+            if(getPermissions(player).isEmpty()) {
+                this.playerPermissions.remove(player.getUniqueId());
+            }
+        }
+
+        public void setPermissions(Map<UUID, Set<ClaimPermission>> playerPermissions) {
+            this.playerPermissions = playerPermissions;
         }
 
         /**
@@ -107,18 +122,35 @@ public class SteepClaim { // TODO fix this class for only chunks.
         private Set<ClaimPermission> getPermissions(UUID id) {
             return playerPermissions.getOrDefault(id, null);
         }
+
+        @NotNull
+        public Map<UUID, Set<ClaimPermission>> getPermissions() {
+            return this.playerPermissions;
+        }
+
+        @NotNull
+        public Map<ClaimFlag, Boolean> getFlags() {
+            return this.flags;
+        }
     }
 
     private final UUID ownerID;
+    private String name;
     private Set<Chunk> chunks;
-    private World world;
     private final ClaimSettings settings;
 
-    public SteepClaim(UUID id, Set<Chunk> chunks) {
+    public SteepClaim(@NotNull UUID id, @NotNull String name, @NotNull Set<Chunk> chunks) {
         this.ownerID = id;
+        this.name = name;
         this.chunks = chunks;
-        this.world = chunks[0].getWorld(); // TODO fix this
         this.settings = new ClaimSettings();
+    }
+
+    public SteepClaim(@NotNull UUID id, @NotNull String name, @NotNull Set<Chunk> chunks, ClaimSettings settings) {
+        this.ownerID = id;
+        this.name = name;
+        this.chunks = chunks;
+        this.settings = settings;
     }
 
     public UUID getOwnerUUID() {
@@ -133,42 +165,12 @@ public class SteepClaim { // TODO fix this class for only chunks.
         return this.settings;
     }
 
-    public void saveToChunk() {
-        putClaimData();
+    private void saveToChunk() {
+        this.chunks.forEach(chunk -> putClaimDataOwnerID(chunk));
     }
 
-    private void putClaimData() {
-        new BukkitRunnable() {
-            @Override
-            public void run() { // TODO fix this too
-                int xfrom = boundingBox.getMin().getBlockX();
-                int zfrom = boundingBox.getMin().getBlockZ();
-                int xto = boundingBox.getMax().getBlockX();
-                int zto = boundingBox.getMax().getBlockZ();
-                Set<Chunk> chunks = new HashSet<>();
-                for(int x = xfrom; x <= xto; x++) {
-                    for(int z  = zfrom; z <= zto; z++) {
-
-                        //TODO CHECK IF CLAIM INTERFERES WITH ANY WORLDGUARD CLAIM THAT IT SHOULDNT (do worldguard regions have ID's?)
-
-                        Chunk chunk = world.getChunkAt(world.getBlockAt(x, 0, z));
-                        if(chunks.contains(chunk)) continue;
-                        chunks.add(chunk);
-
-                    }
-                }
-
-                chunks.forEach(chunk -> {
-
-                    putClaimDataOwnerID(chunk);
-                    putClaimDataBoundingBox(chunk);
-                    putClaimDataWorld(chunk);
-                    putClaimDataPermissions(chunk);
-
-                });
-
-            }
-        }.runTaskAsynchronously(SteepClaims.getInst());
+    public void save() {
+        // save UUID-<name>.yml file
     }
 
     private void putClaimDataOwnerID(Chunk chunk) {
@@ -177,33 +179,53 @@ public class SteepClaim { // TODO fix this class for only chunks.
         DataHandler.setData(chunk, "claim_owner_id", DataType.UUID, this.ownerID);
     }
 
-    private void putClaimDataWorld(Chunk chunk) {
-        if(DataHandler.hasData(chunk, "claim_world", DataType.UUID) &&
-                ((UUID)DataHandler.getData(chunk, "claim_world", DataType.UUID)).equals(this.world.getUID())) return;
-        DataHandler.setData(chunk, "claim_world", DataType.UUID, this.world.getUID());
-    }
-
-    private void putClaimDataBoundingBox(Chunk chunk) {
-        if(DataHandler.hasData(chunk, "claim_boundingbox", DataType.BOUNDING_BOX) &&
-                ((UUID)DataHandler.getData(chunk, "claim_boundingbox", DataType.BOUNDING_BOX)).equals(this.boundingBox)) return;
-        DataHandler.setData(chunk, "claim_boundingbox", DataType.BOUNDING_BOX, this.boundingBox);
-    }
-
-    private void putClaimDataPermissions(Chunk chunk) {
-        String permissions = getPermissionString(this.ownerID);
-        StringBuilder permissionsKey = new StringBuilder("claim_permissions_");
-        permissionsKey.append(this.ownerID);
-        if(DataHandler.hasData(chunk, permissionsKey.toString(), DataType.STRING) &&
-                ((UUID)DataHandler.getData(chunk, permissionsKey.toString(), DataType.STRING)).equals(permissions)) return;
-        DataHandler.setData(chunk, permissionsKey.toString(), DataType.STRING, permissions);
-    }
-
-    private String getPermissionString(UUID id) {
-        // TODO on claim creation do everything async (check for worldguard regions too)
+    private Set<String> getSerializedChunks() {
+        Set<String> chunksStrings = new HashSet<>();
         StringBuilder builder = new StringBuilder();
-        this.settings.getPermissions(id).forEach(permission -> builder.append(builder.isEmpty() ? permission.toString().toUpperCase() + "," : "," + permission
+        for(Chunk chunk : this.chunks) {
+            builder = new StringBuilder();
+            chunksStrings.add(builder.append(chunk.getWorld().getUID().toString().toUpperCase())
+                    .append("|").append(chunk.getX()).append(",").append(chunk.getZ()).toString());
+        }
+        return chunksStrings;
+    }
+
+    private String getSerializedPermissionString(UUID uuid) {
+        StringBuilder builder = new StringBuilder();
+        this.settings.getPermissions(uuid).forEach(permission -> builder.append(builder.isEmpty() ? permission.toString().toUpperCase() + "," : "," + permission
                 .toString().toUpperCase()));
         return builder.toString();
+    }
+
+    private Map<String, String> getSerializedPermissions() {
+        Map<String, String> permissions = new HashMap<>();
+        for(UUID uuid : this.settings.playerPermissions.keySet()) permissions.put(uuid.toString().toUpperCase(), getSerializedPermissionString(uuid));
+        return permissions;
+    }
+
+    private Map<String, Boolean> getSerializedFlags() {
+        Map<String, Boolean> flags = new HashMap<>();
+        for(ClaimSettings.ClaimFlag flag : this.settings.flags.keySet()) flags.put(flag.toString().toUpperCase(), this.settings.getFlags().get(flag));
+        return flags;
+    }
+
+    @NotNull
+    @Override
+    public Map<String, Object> serialize() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("name", this.name);
+        result.put("owner", this.ownerID);
+        result.put("chunks", getSerializedChunks());
+        result.put("permissions", getSerializedPermissions());
+        result.put("flags", getSerializedFlags());
+        return result;
+    }
+
+    public SteepClaim deserialize(Map<String, Object> data) {
+        //map of claimsettings TODO
+        return new SteepClaim((UUID)data.get("owner"), (String)data.get("name"), (Set<Chunk>)data.get("chunks"), new ClaimSettings(
+                //claimsettings TODO
+        ));
     }
 
 

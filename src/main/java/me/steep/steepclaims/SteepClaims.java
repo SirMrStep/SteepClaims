@@ -14,6 +14,7 @@ public class SteepClaims extends JavaPlugin {
 
     public void initialize() {
         DataHandler.register(this);
+        getConfig().get()
 
         /*new BukkitRunnable() {
             @Override
